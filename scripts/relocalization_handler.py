@@ -36,7 +36,7 @@ class RelocalizationHandler:
     def set_map_path_param(self, pcd_path):
         """Set the map_path parameter"""
         try:
-            rospy.set_param('/map_path', pcd_path)
+            rospy.set_param('map_path', pcd_path)
             rospy.loginfo(f"Set map_path parameter to: {pcd_path}")
         except Exception as e:
             rospy.logerr(f"Error setting map_path parameter: {e}")

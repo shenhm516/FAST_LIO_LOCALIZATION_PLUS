@@ -90,8 +90,8 @@ string map_file_path, lid_topic, imu_topic;
 double res_mean_last = 0.05, total_residual = 0.0;
 double last_timestamp_lidar = 0, last_timestamp_imu = -1.0;
 double gyr_cov = 0.1, acc_cov = 0.1, b_gyr_cov = 0.0001, b_acc_cov = 0.0001;
-double filter_size_corner_min = 0, filter_size_surf_min = 0, filter_size_map_min = 0, fov_deg = 0;
-double cube_len = 0, HALF_FOV_COS = 0, FOV_DEG = 0, total_distance = 0, lidar_end_time = 0, first_lidar_time = 0.0;
+double filter_size_corner_min = 0, filter_size_surf_min = 0, filter_size_map_min = 0;
+double cube_len = 0, total_distance = 0, lidar_end_time = 0, first_lidar_time = 0.0;
 int    effct_feat_num = 0, time_log_counter = 0, scan_count = 0, publish_count = 0;
 int    iterCount = 0, feats_down_size = 0, NUM_MAX_ITERATIONS = 0, laserCloudValidNum = 0, pcd_save_interval = -1, pcd_index = 0;
 bool   point_selected_surf[100000] = {0};
@@ -633,7 +633,6 @@ int main(int argc, char** argv)
     nh.param<double>("filter_size_map",filter_size_map_min,0.5);
     nh.param<double>("cube_side_length",cube_len,200);
     nh.param<float>("mapping/det_range",DET_RANGE,300.f);
-    nh.param<double>("mapping/fov_degree",fov_deg,180);
     nh.param<double>("mapping/gyr_cov",gyr_cov,0.1);
     nh.param<double>("mapping/acc_cov",acc_cov,0.1);
     nh.param<double>("mapping/b_gyr_cov",b_gyr_cov,0.0001);
@@ -661,8 +660,6 @@ int main(int argc, char** argv)
     double deltaT, deltaR, aver_time_consu = 0, aver_time_icp = 0, aver_time_match = 0, aver_time_incre = 0, aver_time_solve = 0, aver_time_const_H_time = 0;
     bool flg_EKF_converged, EKF_stop_flg = 0;
     
-    FOV_DEG = (fov_deg + 10.0) > 179.9 ? 179.9 : (fov_deg + 10.0);
-    HALF_FOV_COS = cos((FOV_DEG) * 0.5 * PI_M / 180.0);
 
     _featsArray.reset(new PointCloudXYZI());
 

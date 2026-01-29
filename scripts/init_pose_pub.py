@@ -11,20 +11,20 @@ pub = rospy.Publisher('/relocalization', RelocalizationMsg, queue_size=1, latch=
 relocalization_msg = RelocalizationMsg()
 
 # Set PCD path
-relocalization_msg.pcd_path = "/home/amov/PersonalData/Program/Ros/dispatch_ws/src/dispatch_control/Map/ntuitive/4/4.pcd"
+relocalization_msg.pcd_path = rospy.get_param("map_path")
 
 # Set initial pose
 relocalization_msg.init_pose = PoseStamped()
 relocalization_msg.init_pose.header.frame_id = "map"
 relocalization_msg.init_pose.header.stamp = rospy.Time.now()
 
-relocalization_msg.init_pose.pose.position.x = 2.6
-relocalization_msg.init_pose.pose.position.y = -1.2
+relocalization_msg.init_pose.pose.position.x = 0.0
+relocalization_msg.init_pose.pose.position.y = 0.0
 relocalization_msg.init_pose.pose.position.z = 0
 
 roll = 0.0
 pitch = 0.0
-yaw = -1.83
+yaw = 0.0
 
 quaternion = quaternion_from_euler(roll, pitch, yaw)
 relocalization_msg.init_pose.pose.orientation.x = quaternion[0]
