@@ -6,7 +6,8 @@ ReLocalization::ReLocalization(const std::string& map_path):
                                    relocalzation_flag_(true),
                                    exit_(false) {
     // start pure locaization map
-    localization_thread_ptr_.reset(new std::thread(&ReLocalization::Run, this));
+    if (!map_path.empty())
+        localization_thread_ptr_.reset(new std::thread(&ReLocalization::Run, this));
     map_origin_ptr_.reset(new pcl::PointCloud<pcl::PointXYZINormal>);
     map_cloud_ptr_.reset(new pcl::PointCloud<pcl::PointXYZINormal>);
     

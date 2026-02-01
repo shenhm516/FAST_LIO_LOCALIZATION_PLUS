@@ -29,7 +29,7 @@ constexpr size_t kNUMBER = 36.0;
 class ReLocalization {
 public:   
     
-    ReLocalization(const std::string& map_path);
+    ReLocalization(const std::string& map_path = "");
     
     ~ReLocalization();
 
@@ -78,14 +78,14 @@ public:
         initial_pose_(0,3) = goal->pose.position.x;
         initial_pose_(1,3) = goal->pose.position.y;
         initial_pose_(2,3) = goal->pose.position.z;
-        
+
         tf::Quaternion q(
             goal->pose.orientation.x,
             goal->pose.orientation.y,
             goal->pose.orientation.z,
             goal->pose.orientation.w
         );
-        
+
         tf::Matrix3x3 R(q);
 
         initial_pose_(0, 0) = R[0][0];
@@ -131,14 +131,14 @@ public:
 
     //! fusion pose
     bool has_initial_pose_;
+    Eigen::Matrix4f initial_pose_;
 private:
     std::string map_path_;
     std::unique_ptr<std::thread> localization_thread_ptr_;
     pcl::PointCloud<pcl::PointXYZINormal>::Ptr map_origin_ptr_;
     pcl::PointCloud<pcl::PointXYZINormal>::Ptr map_cloud_ptr_;
-    Eigen::Matrix4f initial_pose_;
 
-    std::mutex mtx_;               
+    std::mutex mtx_;
     std::condition_variable cv;
     bool map_ready_ = false;
     bool relocalzation_flag_;

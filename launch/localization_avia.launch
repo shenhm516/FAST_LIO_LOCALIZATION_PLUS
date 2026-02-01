@@ -12,7 +12,7 @@
 	<param name="filter_size_map" type="double" value="0.2" />
 	<param name="cube_side_length" type="double" value="1000" />
 	<param name="runtime_pos_log_enable" type="bool" value="0" />
-	<param name="map_path" type="string" value="/home/nv/drone_ws/fastlioplus_ws/src/FAST_LIO_LOCALIZATION_PLUS/PCD/scans.pcd" />
+	<param name="map_path" type="string" value="/home/shenhm/work/fastlio_jp_ws/src/FAST_LIO_LOCALIZATION_PLUS/PCD/scans.pcd" />
 	<!-- <group ns="uav1">		 -->
 	<group if="$(arg rviz)">
 		<node launch-prefix="nice" pkg="rviz" type="rviz" name="rviz" args="-d $(find fast_lio)/rviz_cfg/localization.rviz"/>

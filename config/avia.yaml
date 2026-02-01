@@ -1,11 +1,15 @@
 common:
     # lid_topic:  "/merged_livox"
     # imu_topic:  "/merged_imu"
-    lid_topic:  "/livox/lidar"
-    imu_topic:  "/livox/imu"
+    robot_num: 3                 # number of robots, set to 1 if only one robot is used
+    lid_topic:  "livox/lidar"
+    imu_topic:  "livox/imu"
     time_sync_en: false         # ONLY turn on when external time synchronization is really not possible
     time_offset_lidar_to_imu: 0.0 # Time offset between lidar and IMU calibrated by other algorithms, e.g. LI-Init (can be found in README).
                                   # This param will take effect no matter what time_sync_en is. So if the time offset is not known exactly, please set as 0.0
+    init_pose: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                -0.3, -7.0, 0.0, 0.0, 0.0, 0.0,
+                -0.5, -13.0, 0.0, 0.0, 0.0, 0.0,]  # x,y,z,roll,pitch,yaw for robot 1
 
 preprocess:
     lidar_type: 1                # 1 for Livox serials LiDAR, 2 for Velodyne LiDAR, 3 for ouster LiDAR, 
@@ -27,7 +31,7 @@ mapping:
                    0, 0, 1]
 
 publish:
-    path_en:  false
+    path_en:  true
     scan_publish_en:  true       # false: close all the point cloud output
     dense_publish_en: true       # false: low down the points number in a global-frame point clouds scan.
     scan_bodyframe_pub_en: true  # true: output the point cloud scans in IMU-body-frame

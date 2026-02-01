@@ -59,6 +59,18 @@ find_package(catkin REQUIRED COMPONENTS
 find_package(Eigen3 REQUIRED)
 find_package(PCL 1.8 REQUIRED)
 
+# Pybind11
+execute_process(COMMAND python3 -m pybind11 --cmakedir
+                OUTPUT_VARIABLE PYBIND11_CMAKE_DIR
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
+if(NOT PYBIND11_CMAKE_DIR)
+    message(STATUS "pybind11 not found via pip, trying find_package...")
+    find_package(pybind11 REQUIRED)
+else()
+    list(APPEND CMAKE_PREFIX_PATH "${PYBIND11_CMAKE_DIR}")
+    find_package(pybind11 REQUIRED)
+endif()
+
 message(Eigen: ${EIGEN3_INCLUDE_DIR})
 
 include_directories(
@@ -87,13 +99,21 @@ catkin_package(
 
 catkin_install_python(PROGRAMS
   scripts/init_pose_pub.py
+  scripts/multi_init_pose_pub.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
-add_executable(fastlio_mapping src/laserMapping.cpp include/ikd-Tree/ikd_Tree.cpp src/preprocess.cpp)
+add_executable(fastlio_mapping src/laserMapping.cpp include/ikd-Tree/ikd_Tree.cpp src/preprocess.cpp src/relocalization.cpp)
 target_link_libraries(fastlio_mapping ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES})
 target_include_directories(fastlio_mapping PRIVATE ${PYTHON_INCLUDE_DIRS})
 
 add_executable(fastlio_localization src/laserLocalization.cpp include/ikd-Tree/ikd_Tree.cpp src/preprocess.cpp src/relocalization.cpp)
 target_link_libraries(fastlio_localization ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES} )
 target_include_directories(fastlio_localization PRIVATE ${PYTHON_INCLUDE_DIRS})
+
+# Pybind11 module for NDT matching
+find_package(pybind11 REQUIRED)
+pybind11_add_module(pycloud_matcher src/pycloud_matcher.cpp src/relocalization.cpp include/ikd-Tree/ikd_Tree.cpp)
+target_link_libraries(pycloud_matcher PRIVATE ${catkin_LIBRARIES} ${PCL_LIBRARIES} ${PYTHON_LIBRARIES})
+target_include_directories(pycloud_matcher PRIVATE ${PYTHON_INCLUDE_DIRS} ${EIGEN3_INCLUDE_DIR})
+target_compile_definitions(pycloud_matcher PRIVATE VERSION_INFO=${EXAMPLE_VERSION_INFO})

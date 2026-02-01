@@ -39,6 +39,8 @@
 #include <fstream>
 #include <csignal>
 #include <unistd.h>
+#include <sstream>
+#include <zlib.h>
 #include <Python.h>
 #include <so3_math.h>
 #include <ros/ros.h>
@@ -47,6 +49,8 @@
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/Path.h>
 #include <visualization_msgs/Marker.h>
+#include <std_msgs/UInt8MultiArray.h>
+#include <std_srvs/Trigger.h>
 #include <pcl_conversions/pcl_conversions.h>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
@@ -60,6 +64,7 @@
 #include <ikd-Tree/ikd_Tree.h>
 #include "preprocess.h"
 #include "IMU_Processing.hpp"
+#include "relocalization.h"
 // #include "ceres/ceres.h"
 // #include "ceres/rotation.h"
 
@@ -85,7 +90,7 @@ mutex mtx_buffer;
 condition_variable sig_buffer;
 
 string root_dir = ROOT_DIR;
-string map_file_path, lid_topic, imu_topic;
+string map_file_path, lid_topic, imu_topic, body_frame;
 
 double res_mean_last = 0.05, total_residual = 0.0;
 double last_timestamp_lidar = 0, last_timestamp_imu = -1.0;
@@ -97,6 +102,9 @@ int    iterCount = 0, feats_down_size = 0, NUM_MAX_ITERATIONS = 0, laserCloudVal
 bool   point_selected_surf[100000] = {0};
 bool   lidar_pushed, flg_first_scan = true, flg_exit = false, flg_EKF_inited;
 bool   scan_pub_en = false, dense_pub_en = false, scan_body_pub_en = false;
+// Service flag for requesting point cloud publish
+bool   flg_publish_cloud_requested = false;
+std::unique_ptr<ReLocalization> init_localization;
 
 vector<vector<int>>  pointSearchInd_surf; 
 vector<BoxPointType> cub_needrm;
@@ -625,7 +633,7 @@ void publish_odometry(const ros::Publisher & pubOdomAftMapped)
     q.setY(odomAftMapped.pose.pose.orientation.y);
     q.setZ(odomAftMapped.pose.pose.orientation.z);
     transform.setRotation( q );
-    br.sendTransform( tf::StampedTransform( transform, odomAftMapped.header.stamp, "camera_init", "body" ) );
+    br.sendTransform( tf::StampedTransform( transform, odomAftMapped.header.stamp, "camera_init", body_frame ) );
     file << lidar_end_time <<","
          << odomAftMapped.pose.pose.position.x <<","
          << odomAftMapped.pose.pose.position.y <<","
@@ -652,57 +660,76 @@ void publish_path(const ros::Publisher pubPath)
     }
 }
 
-void PublishLocalization(const ros::Publisher &pubGlobalization,
-                         const Eigen::Matrix4f &estimation_pose) {
-    nav_msgs::Odometry global_localization;
-    global_localization.header.frame_id = "map";
-    global_localization.child_frame_id = "local_map";
-    global_localization.header.stamp = ros::Time().fromSec(lidar_end_time);// ros::Time().fromSec(lidar_end_time);
+// Publish zlib compressed point cloud
+void publish_compressed_cloud(const ros::Publisher &pubCompressed,
+                               const pcl::PointCloud<pcl::PointXYZINormal>::Ptr &cloud)
+{
+    if (cloud->empty()) return;
 
-    global_localization.pose.pose.position.x = estimation_pose(0,3);
-    global_localization.pose.pose.position.y = estimation_pose(1,3);
-    global_localization.pose.pose.position.z = estimation_pose(2,3);
+    std::cout << "Point cloud: " << cloud->points.size() << " points" << std::endl;
 
-    Eigen::Quaternionf quaternion(estimation_pose.topLeftCorner<3,3>());
-    // Normalize quaternion
-    double norm = sqrt(quaternion.w()*quaternion.w() + 
-                       quaternion.x()*quaternion.x() + 
-                       quaternion.y()*quaternion.y() + 
-                       quaternion.z()*quaternion.z());
-    quaternion.w() /= norm; quaternion.x() /= norm; quaternion.y() /= norm; quaternion.z() /= norm;
+    // Serialize point cloud field by field (8 floats per point, 32 bytes total)
+    // This avoids padding issues with pcl::PointXYZINormal (which is 48 bytes due to alignment)
+    size_t num_points = cloud->points.size();
+    size_t data_size = num_points * 8 * sizeof(float);  // 8 floats per point
+    std::vector<float> buffer;
+    buffer.reserve(num_points * 8);
 
-    global_localization.pose.pose.orientation.x = quaternion.x();
-    global_localization.pose.pose.orientation.y = quaternion.y();
-    global_localization.pose.pose.orientation.z = quaternion.z();
-    global_localization.pose.pose.orientation.w = quaternion.w();
+    for (size_t i = 0; i < num_points; ++i) {
+        const auto& p = cloud->points[i];
+        buffer.push_back(p.x);
+        buffer.push_back(p.y);
+        buffer.push_back(p.z);
+        buffer.push_back(p.intensity);
+        buffer.push_back(p.normal_x);
+        buffer.push_back(p.normal_y);
+        buffer.push_back(p.normal_z);
+        buffer.push_back(p.curvature);
+    }
 
+    std::string cloud_data(reinterpret_cast<const char*>(buffer.data()), data_size);
 
-    
-    pubGlobalization.publish(global_localization);
-    // auto P = kf.get_P();
-    // for (int i = 0; i < 6; i ++)
-    // {
-    //     int k = i < 3 ? i + 3 : i - 3;
-    //     odomAftMapped.pose.covariance[i*6 + 0] = P(k, 3);
-    //     odomAftMapped.pose.covariance[i*6 + 1] = P(k, 4);
-    //     odomAftMapped.pose.covariance[i*6 + 2] = P(k, 5);
-    //     odomAftMapped.pose.covariance[i*6 + 3] = P(k, 0);
-    //     odomAftMapped.pose.covariance[i*6 + 4] = P(k, 1);
-    //     odomAftMapped.pose.covariance[i*6 + 5] = P(k, 2);
-    // }
+    std::cout << "Serialized data size: " << cloud_data.size() << " bytes (32 bytes per point)" << std::endl;
 
-    static tf::TransformBroadcaster br;
-    tf::Transform                   transform;
-    tf::Quaternion                  q;
-    transform.setOrigin(tf::Vector3(global_localization.pose.pose.position.x, \
-                                    global_localization.pose.pose.position.y, \
-                                    global_localization.pose.pose.position.z));
-    q.setW(global_localization.pose.pose.orientation.w);
-    q.setX(global_localization.pose.pose.orientation.x);
-    q.setY(global_localization.pose.pose.orientation.y);
-    q.setZ(global_localization.pose.pose.orientation.z);
-    transform.setRotation( q );
-    br.sendTransform( tf::StampedTransform( transform, global_localization.header.stamp, "map", "local_map" ) );
+    // zlib compress
+    uLongf compressed_size = compressBound(cloud_data.size());
+    std::vector<Bytef> compressed_data(compressed_size);
+    compress2(compressed_data.data(), &compressed_size,
+              reinterpret_cast<const Bytef*>(cloud_data.data()), cloud_data.size(),
+              Z_BEST_COMPRESSION);
+
+    // Publish compressed data
+    std_msgs::UInt8MultiArray msg;
+    msg.data.assign(compressed_data.begin(), compressed_data.begin() + compressed_size);
+    pubCompressed.publish(msg);
+
+    std::cout << "Published compressed cloud: " << cloud_data.size()
+              << " -> " << compressed_size << " bytes (ratio: "
+              << (100.0 * compressed_size / cloud_data.size()) << "%)" << std::endl;
+}
+
+// Service callback for requesting point cloud publish
+bool publish_cloud_service_callback(std_srvs::Trigger::Request &req,
+                                     std_srvs::Trigger::Response &res)
+{
+    flg_publish_cloud_requested = true;
+    res.success = true;
+    res.message = "Point cloud publish requested";
+    std::cout << "[Service] Point cloud publish request received" << std::endl;
+    return true;
+}
+
+// Global pointer for init_pose callback
+// ReLocalization* g_init_localization = nullptr;
+
+// Callback for receiving initial pose
+void init_pose_callback(const geometry_msgs::PoseStamped::ConstPtr &msg)
+{
+    std::cout << "[Init Pose] Received initial pose: "
+              << "x=" << msg->pose.position.x
+              << ", y=" << msg->pose.position.y
+              << ", z=" << msg->pose.position.z << std::endl;
+    init_localization->GetInitialPose(msg);
 }
 
 std::vector<float> dis;
@@ -826,52 +853,6 @@ void h_share_model(state_ikfom &s, esekfom::dyn_share_datastruct<double> &ekfom_
     }
     solve_time += omp_get_wtime() - solve_start_;
 }
-
-// struct ReprojectionError3D
-// {
-// 	EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-// 	ReprojectionError3D(double ob[], 
-//                         double ce[],
-//                         double k_c[]) {
-//         for (size_t i = 0; i < 4; i++) {
-//             if (i == 3) {
-//                 k[i] = k_c[i];
-//                 continue;
-//             }
-//             observed[i] = ob[i];
-//             center[i] = ce[i];
-//             k[i] = k_c[i];
-//         }
-//     }
-
-// 	template <typename T>
-// 	bool operator()(const T* const rot, const T* const tran,  T* residuals) const
-// 	{
-// 		T p[3];
-//         T pos[3];
-//         pos[0] = T(observed[0]);
-//         pos[1] = T(observed[1]);
-//         pos[2] = T(observed[2]);
-// 		ceres::QuaternionRotatePoint(rot, pos, p);
-// 		p[0] += tran[0]; p[1] += tran[1]; p[2] += tran[2];
-
-//     	residuals[0] = T(k[0])*p[0] + T(k[1])*p[1] + T(k[2])*p[2] + k[3];
-//     	return true;
-// 	}
-
-// 	static ceres::CostFunction* Create(double ob[], 
-//                                        double ce[],
-//                                        double k_c[]) {
-// 	  return (new ceres::AutoDiffCostFunction<
-// 	          ReprojectionError3D, 1, 4, 3>(
-// 	          	new ReprojectionError3D(ob, ce, k_c)));
-// 	}
-
-// 	double observed[3];
-//     double center[3]; 
-//     double k[4];
-// };
-
 
 bool fi_k = true;
 string dis_log = root_dir + "/Log/dis_erros.csv";
@@ -1040,7 +1021,17 @@ int main(int argc, char** argv)
     nh.param<string>("common/lid_topic",lid_topic,"/livox/lidar");
     nh.param<string>("common/imu_topic", imu_topic,"/livox/imu");
     nh.param<bool>("common/time_sync_en", time_sync_en, false);
+
+    // Get namespace and construct body frame id
+    std::string ns = nh.getNamespace();
+    // Remove leading "/" if present
+    if (!ns.empty() && ns[0] == '/') {
+        ns = ns.substr(1);
+    }
+    body_frame = ns.empty() ? "body" : ns + "/body";
     nh.param<double>("common/time_offset_lidar_to_imu", time_diff_lidar_to_imu, 0.0);
+    int robot_num;
+    nh.param<int> ("common/time_offset_lidar_to_imu", robot_num, 1);
     nh.param<double>("filter_size_corner",filter_size_corner_min,0.5);
     nh.param<double>("filter_size_surf",filter_size_surf_min,0.5);
     nh.param<double>("filter_size_map",filter_size_map_min,0.5);
@@ -1074,6 +1065,7 @@ int main(int argc, char** argv)
     double deltaT, deltaR, aver_time_consu = 0, aver_time_icp = 0, aver_time_match = 0, aver_time_incre = 0, aver_time_solve = 0, aver_time_const_H_time = 0;
     bool flg_EKF_converged, EKF_stop_flg = 0;
     
+    init_localization.reset(new ReLocalization());
     _featsArray.reset(new PointCloudXYZI());
 
     memset(point_selected_surf, true, sizeof(point_selected_surf));
@@ -1123,9 +1115,13 @@ int main(int argc, char** argv)
     ros::Publisher pubLaserCloudMap = nh.advertise<sensor_msgs::PointCloud2>
             ("/Laser_map", 100000);
     ros::Publisher pubOdomAftMapped = nh.advertise<nav_msgs::Odometry> 
-            ("/Odometry", 100000);
-    ros::Publisher pubPath          = nh.advertise<nav_msgs::Path> 
-            ("/path", 100000);
+            ("Odometry", 100000);
+    ros::Publisher pubPath          = nh.advertise<nav_msgs::Path>
+            ("path", 100000);
+    ros::Publisher pubRawCompressed = nh.advertise<std_msgs::UInt8MultiArray>
+            ("cloud_raw_compressed", 100000);
+    ros::ServiceServer srv_publish_cloud = nh.advertiseService("publish_cloud", publish_cloud_service_callback);
+    ros::Subscriber sub_init_pose = nh.subscribe<geometry_msgs::PoseStamped>("init_pose", 1, init_pose_callback);
 //------------------------------------------------------------------------------------------------------
     signal(SIGINT, SigHandle);
     ros::Rate rate(5000);
@@ -1150,8 +1146,20 @@ int main(int argc, char** argv)
             {
                 first_lidar_time = Measures.lidar_beg_time;
                 p_imu->first_lidar_time = first_lidar_time;
-                flg_first_scan = false;
-                continue;
+
+                // Publish compressed point cloud when service is requested
+                if (flg_publish_cloud_requested && !Measures.lidar->empty()) {
+                    publish_compressed_cloud(pubRawCompressed, Measures.lidar);
+                    flg_publish_cloud_requested = false;  // Reset flag
+                }
+                
+                if (!init_localization->has_initial_pose_) {
+                    // std::cout << "WARNING: There is not enough imu meas for initilization!!!"<< std::endl;
+                    flg_first_scan = true;
+                    continue;
+                } else {
+                    flg_first_scan = false;
+                }
             }
 
             double t0,t1,t2,t3,t4,t5,match_start, solve_start, svd_time;
@@ -1163,7 +1171,12 @@ int main(int argc, char** argv)
             svd_time   = 0;
             t0 = omp_get_wtime();
 
-            p_imu->Process(Measures, kf, feats_undistort);
+            Eigen::Vector3d t(init_localization->initial_pose_(0,3), init_localization->initial_pose_(1,3), init_localization->initial_pose_(2,3));
+            Eigen::Matrix3d r;
+            r = init_localization->initial_pose_.block<3,3>(0,0).cast<double>();
+            p_imu->Process(Measures, kf, feats_undistort, t, r);
+            
+            // p_imu->Process(Measures, kf, feats_undistort);
             state_ikfom state_point_p = kf.get_x();
             pos_lid = state_point_p.pos + state_point_p.rot * state_point_p.offset_T_L_I;
 
