@@ -546,8 +546,7 @@ void publish_frame_body(const ros::Publisher & pubLaserCloudFull_body)
 
     for (int i = 0; i < size; i++)
     {
-        RGBpointBodyLidarToIMU(&feats_undistort->points[i], \
-                            &laserCloudIMUBody->points[i]);
+        RGBpointBodyLidarToIMU(&feats_undistort->points[i], &laserCloudIMUBody->points[i]);
     }
 
     sensor_msgs::PointCloud2 laserCloudmsg;
@@ -1030,8 +1029,6 @@ int main(int argc, char** argv)
     }
     body_frame = ns.empty() ? "body" : ns + "/body";
     nh.param<double>("common/time_offset_lidar_to_imu", time_diff_lidar_to_imu, 0.0);
-    int robot_num;
-    nh.param<int> ("common/time_offset_lidar_to_imu", robot_num, 1);
     nh.param<double>("filter_size_corner",filter_size_corner_min,0.5);
     nh.param<double>("filter_size_surf",filter_size_surf_min,0.5);
     nh.param<double>("filter_size_map",filter_size_map_min,0.5);
@@ -1109,7 +1106,7 @@ int main(int argc, char** argv)
     ros::Publisher pubLaserCloudFull = nh.advertise<sensor_msgs::PointCloud2>
             ("/cloud_registered", 100000);
     ros::Publisher pubLaserCloudFull_body = nh.advertise<sensor_msgs::PointCloud2>
-            ("/cloud_registered_body", 100000);
+            ("cloud_registered_body", 100000);
     ros::Publisher pubLaserCloudEffect = nh.advertise<sensor_msgs::PointCloud2>
             ("/cloud_effected", 100000);
     ros::Publisher pubLaserCloudMap = nh.advertise<sensor_msgs::PointCloud2>
@@ -1154,7 +1151,26 @@ int main(int argc, char** argv)
                 }
                 
                 if (!init_localization->has_initial_pose_) {
-                    // std::cout << "WARNING: There is not enough imu meas for initilization!!!"<< std::endl;
+                    // Publish raw lidar cloud projected to IMU frame
+                    if (!Measures.lidar->empty()) {
+                        PointCloudXYZI::Ptr lidarInImuFrame(new PointCloudXYZI(Measures.lidar->size(), 1));
+                        for (size_t i = 0; i < Measures.lidar->size(); i++) {
+                            V3D p_lidar(Measures.lidar->points[i].x,
+                                        Measures.lidar->points[i].y,
+                                        Measures.lidar->points[i].z);
+                            V3D p_imu = Lidar_R_wrt_IMU * p_lidar + Lidar_T_wrt_IMU;
+
+                            lidarInImuFrame->points[i].x = p_imu(0);
+                            lidarInImuFrame->points[i].y = p_imu(1);
+                            lidarInImuFrame->points[i].z = p_imu(2);
+                            lidarInImuFrame->points[i].intensity = Measures.lidar->points[i].intensity;
+                        }
+                        sensor_msgs::PointCloud2 cloudMsg;
+                        pcl::toROSMsg(*lidarInImuFrame, cloudMsg);
+                        cloudMsg.header.stamp = ros::Time().fromSec(Measures.lidar_beg_time);
+                        cloudMsg.header.frame_id = "body";
+                        pubLaserCloudFull_body.publish(cloudMsg);
+                    }
                     flg_first_scan = true;
                     continue;
                 } else {

@@ -100,6 +100,7 @@ catkin_package(
 catkin_install_python(PROGRAMS
   scripts/init_pose_pub.py
   scripts/multi_init_pose_pub.py
+  scripts/outline_map_reg.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
